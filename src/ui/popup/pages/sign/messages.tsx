@@ -1,8 +1,9 @@
-import React from "react";
+import React, { FunctionComponent, useState } from "react";
 import { shortenAddress } from "../../../../common/address";
 import { CoinUtils } from "../../../../common/coin-utils";
 import { Coin } from "@everett-protocol/cosmosjs/common/coin";
 import { IntlShape, FormattedMessage } from "react-intl";
+import { Button } from "reactstrap";
 
 export interface MessageObj {
   type: string;
@@ -55,11 +56,27 @@ interface MsgWithdrawDelegatorReward {
   };
 }
 
+interface MsgExecuteContract {
+  type: "wasm/MsgExecuteContract";
+  value: {
+    contract: string;
+    msg: object;
+    sender: string;
+    sent_funds: [
+      {
+        amount: string;
+        denom: string;
+      }
+    ];
+  };
+}
+
 type Messages =
   | MsgSend
   | MsgDelegate
   | MsgUndelegate
-  | MsgWithdrawDelegatorReward;
+  | MsgWithdrawDelegatorReward
+  | MsgExecuteContract;
 
 // Type guard for messages.
 function MessageType<T extends Messages>(
@@ -182,6 +199,20 @@ export function renderMessage(
     };
   }
 
+  if (MessageType<MsgExecuteContract>(msg, "wasm/MsgExecuteContract")) {
+    return {
+      icon: "fas fa-question",
+      title: "Execute Wasm Contract",
+      content: (
+        <React.Fragment>
+          Execute contract <b>{shortenAddress(msg.value.contract, 30)}</b>
+          <br />
+          <WasmExecutionMsgView msg={msg.value.msg} />
+        </React.Fragment>
+      )
+    };
+  }
+
   return {
     icon: undefined,
     title: "Unknown",
@@ -189,6 +220,34 @@ export function renderMessage(
   };
 }
 /* eslint-enable react/display-name */
+
+export const WasmExecutionMsgView: FunctionComponent<{ msg: object }> = ({
+  msg
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleOpen = () => setIsOpen(isOpen => !isOpen);
+
+  return (
+    <div>
+      {/* TODO: Show sent funds */}
+      {isOpen ? <pre>{JSON.stringify(msg, null, 2)}</pre> : null}
+      <Button
+        size="sm"
+        style={{ position: "absolute", right: "20px" }}
+        onClick={e => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          toggleOpen();
+        }}
+      >
+        {isOpen ? "Close" : "Details"}
+      </Button>
+      <div style={{ height: "36px" }} />
+    </div>
+  );
+};
 
 function clearDecimals(dec: string): string {
   for (let i = dec.length - 1; i >= 0; i--) {
