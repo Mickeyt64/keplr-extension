@@ -1,4 +1,24 @@
-import { GetKeyMsg, RequestSignMsg } from "../../background/keyring";
+import {
+  OfflineSigner,
+  AccountData,
+  PrehashType,
+  StdSignature,
+  InProcessOnlineSigner,
+  BroadcastMode,
+  SignRequest,
+  BroadcastTxResult,
+  Coin
+} from "@cosmjs/launchpad";
+
+import { Coin as CosmosJsCoin } from "@everett-protocol/cosmosjs/common/coin";
+
+import { Keplr } from "./common";
+
+import {
+  GetKeyMsg,
+  RequestSignMsg,
+  RequestTxBuilderConfigMsg
+} from "../../background/keyring";
 import { sendMessage } from "../../common/message/send";
 import { BACKGROUND_PORT } from "../../common/message/constant";
 import { toBase64 } from "@cosmjs/encoding";
@@ -8,49 +28,91 @@ const Buffer = require("buffer/").Buffer;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Manifest = require("../../manifest.json");
 
-export type PrehashType = "sha256" | "sha512" | null;
+type Mutable<T extends object> = {
+  -readonly [K in keyof T]: T[K];
+};
 
-export type Algo = "secp256k1" | "ed25519" | "sr25519";
+export class CosmJSOnlineSigner extends InProcessOnlineSigner {
+  constructor(
+    public readonly chainId: string,
+    apiUrl: string,
+    broadcastMode = BroadcastMode.Block
+  ) {
+    super(new CosmJSOfflineSigner(chainId), apiUrl, broadcastMode);
+  }
 
-export interface AccountData {
-  // bech32-encoded
-  readonly address: string;
-  readonly algo: Algo;
-  readonly pubkey: Uint8Array;
-}
+  async enable(): Promise<boolean> {
+    // If enabling is rejected, it will throw an error.
+    await Keplr.enable(this.chainId);
+    // When we should return false?
+    return true;
+  }
 
-export interface StdSignature {
-  readonly pub_key: PubKey;
-  readonly signature: string;
-}
-
-export interface PubKey {
-  // type is one of the strings defined in pubkeyTypes
-  // I don't use a string literal union here as that makes trouble with json test data:
-  // https://github.com/CosmWasm/cosmjs/pull/44#pullrequestreview-353280504
-  readonly type: string;
-  // Value field is base64-encoded in all cases
-  // Note: if type is Secp256k1, this must contain a COMPRESSED pubkey - to encode from bcp/keycontrol land, you must compress it first
-  readonly value: string;
-}
-
-export interface OfflineSigner {
-  /**
-   * Get AccountData array from wallet. Rejects if not enabled.
-   */
-  readonly getAccounts: () => Promise<readonly AccountData[]>;
-
-  /**
-   * Request signature from whichever key corresponds to provided bech32-encoded address. Rejects if not enabled.
-   */
-  readonly sign: (
+  async signAndBroadcast(
     address: string,
-    message: Uint8Array,
-    prehashType?: PrehashType
-  ) => Promise<StdSignature>;
+    request: SignRequest
+  ): Promise<BroadcastTxResult> {
+    // this.getSequence is the private method currently.
+    // But, in the prototype, just use it by ignoring type-checking.
+    // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
+    // @ts-ignore
+    const { accountNumber, sequence } = await this.getSequence(address);
+
+    if (!request.fee?.gas) {
+      throw new Error(
+        "Please, set gas explicitly. Gas adjustment is not supported yet"
+      );
+    }
+
+    const random = new Uint8Array(4);
+    crypto.getRandomValues(random);
+    const id = Buffer.from(random).toString("hex");
+
+    const msg = new RequestTxBuilderConfigMsg(
+      {
+        chainId: this.chainId,
+        accountNumber,
+        sequence,
+        memo: request.memo || "",
+        gas: request.fee.gas,
+        fee: CosmJSOnlineSigner.coinsToString(request.fee?.amount)
+      },
+      id,
+      true,
+      window.location.origin
+    );
+
+    const txBuilderConfig = await sendMessage(BACKGROUND_PORT, msg);
+
+    const resultRequest: Mutable<SignRequest> = request;
+
+    resultRequest.fee = {
+      gas: txBuilderConfig.config.gas,
+      amount: txBuilderConfig.config.fee
+        .split(",")
+        .map(str => CosmosJsCoin.parse(str))
+        .map(coin => {
+          return {
+            denom: coin.denom,
+            amount: coin.amount.toString()
+          };
+        })
+    };
+    resultRequest.memo = txBuilderConfig.config.memo;
+
+    return await super.signAndBroadcast(address, resultRequest);
+  }
+
+  private static coinsToString(coins: readonly Coin[] | undefined): string {
+    if (coins === undefined) {
+      return "";
+    }
+
+    return coins.map(coin => `${coin.amount} ${coin.denom}`).join(",");
+  }
 }
 
-export class InjectedCosmJSWalletProvider implements OfflineSigner {
+export class CosmJSOfflineSigner implements OfflineSigner {
   public readonly identifier: string = "keplr-extension";
   public readonly version: string = Manifest.version;
 

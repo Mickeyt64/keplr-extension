@@ -1,6 +1,7 @@
 import { InjectedCosmosJSWalletProvider } from "./cosmosjs-provider";
-import { InjectedCosmJSWalletProvider } from "./cosmjs-provder";
+import { CosmJSOnlineSigner } from "./cosmjs-provder";
 import { Keplr } from "./common";
+import { BroadcastMode } from "@cosmjs/launchpad";
 
 // Give a priority to production build.
 if (process.env.NODE_ENV !== "production") {
@@ -21,16 +22,24 @@ if (process.env.NODE_ENV !== "production") {
   if (!window.getCosmJSWalletProvider) {
     // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
     // @ts-ignore
-    window.getCosmJSWalletProvider = (chainId: string) => {
-      return new InjectedCosmJSWalletProvider(chainId);
+    window.getCosmJSOnlineSigner = (
+      chainId: string,
+      apiUrl: string,
+      broadcastMode: BroadcastMode = BroadcastMode.Block
+    ) => {
+      return new CosmJSOnlineSigner(chainId, apiUrl, broadcastMode);
     };
   }
 } else {
   window.cosmosJSWalletProvider = new InjectedCosmosJSWalletProvider();
   // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
   // @ts-ignore
-  window.getCosmJSWalletProvider = (chainId: string) => {
-    return new InjectedCosmJSWalletProvider(chainId);
+  window.getCosmJSOnlineSigner = (
+    chainId: string,
+    apiUrl: string,
+    broadcastMode: BroadcastMode = BroadcastMode.Block
+  ) => {
+    return new CosmJSOnlineSigner(chainId, apiUrl, broadcastMode);
   };
   // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
   // @ts-ignore
